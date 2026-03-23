@@ -1,0 +1,1726 @@
+<!DOCTYPE html>
+<!--
+===========================================
+STAND BATTLE - オンライン対戦機能付き
+===========================================
+
+【オンライン対戦を有効化する方法】
+
+1. Firebaseプロジェクトを作成
+   https://console.firebase.google.com/ にアクセス
+   
+2. 「プロジェクトを追加」をクリック
+   
+3. プロジェクト名を入力（例: stand-battle）
+   
+4. Realtime Databaseを有効化
+   - 左メニューから「Realtime Database」を選択
+   - 「データベースを作成」をクリック
+   - ロケーション: asia-northeast1（東京）を推奨
+   - セキュリティルール: テストモードで開始
+   
+5. Web アプリを追加
+   - プロジェクト設定（歯車アイコン）
+   - 「アプリを追加」→ Web を選択
+   - アプリのニックネーム入力（例: stand-battle-web）
+   - Firebase Hosting は不要
+   
+6. 設定情報をコピー
+   - 表示される firebaseConfig をコピー
+   - このファイルの firebaseConfig（865行目付近）を置き換える
+   
+7. 完了！
+   - ファイルをブラウザで開くとオンライン対戦が使えます
+
+【料金】
+- Sparkプラン（無料）で十分です
+- 月間データ転送: 10GB
+- 同時接続: 100人
+- クレジットカード登録不要
+
+===========================================
+-->
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STAND BATTLE</title>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        #app {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .screen {
+            display: none;
+            width: 100%;
+            height: 100%;
+        }
+
+        .screen.active {
+            display: flex;
+        }
+
+        /* タイトル画面 */
+        #titleScreen {
+            background: linear-gradient(135deg, #000 0%, #1a0033 100%);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #titleScreen h1 {
+            font-size: clamp(3rem, 12vw, 7rem);
+            font-weight: 400;
+            color: #fff;
+            margin-bottom: 3rem;
+            letter-spacing: 0.3em;
+            animation: fadeInDown 1s ease-out;
+        }
+
+        #titleScreen button {
+            background: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 1.5rem 4rem;
+            color: #000;
+            font-size: 1.5rem;
+            font-weight: 400;
+            cursor: pointer;
+            animation: fadeInUp 1s ease-out 0.3s both;
+        }
+
+        #titleScreen .info {
+            position: fixed;
+            bottom: 1rem;
+            left: 1rem;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        /* キャラ選択画面 */
+        .selectScreen {
+            background: linear-gradient(to bottom, #000, #1a0033);
+            padding: 2rem;
+            overflow-y: auto;
+            flex-direction: column;
+        }
+
+        .playerLabel {
+            position: fixed;
+            top: 2rem;
+            left: 2rem;
+            background: rgba(255,255,255,0.1);
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            border: 1px solid #fff;
+        }
+
+        .playerLabel .subtitle {
+            font-size: 0.9rem;
+            color: #999;
+            margin-bottom: 0.3rem;
+        }
+
+        .playerLabel .number {
+            font-size: 2rem;
+            color: #fff;
+            font-weight: 400;
+        }
+
+        .selectedInfo {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            background: rgba(255,255,255,0.1);
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            animation: slideInRight 0.5s ease-out;
+        }
+
+        .selectedInfo .subtitle {
+            font-size: 0.9rem;
+            color: #999;
+            margin-bottom: 0.3rem;
+        }
+
+        .selectScreen h2 {
+            font-size: clamp(2rem, 6vw, 3rem);
+            color: #fff;
+            text-align: center;
+            margin-bottom: 3rem;
+            font-weight: 400;
+            padding-top: 5rem;
+        }
+
+        .characterGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 1rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .characterCard {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 1.5rem 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .characterCard:hover {
+            transform: scale(1.05);
+        }
+
+        .characterCard.selected {
+            transform: scale(1.05);
+        }
+
+        .characterCard img {
+            width: 100%;
+            height: 120px;
+            object-fit: contain;
+            margin-bottom: 0.8rem;
+            image-rendering: pixelated;
+        }
+
+        .characterCard h3 {
+            font-size: 1.1rem;
+            color: #fff;
+            margin-bottom: 0.3rem;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        .characterCard p {
+            font-size: 0.9rem;
+            margin: 0;
+            text-align: center;
+        }
+
+        /* AI選択画面 */
+        #aiChoiceScreen {
+            background: #000;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        #aiChoiceScreen h2 {
+            font-size: 2.5rem;
+            color: #fff;
+            margin-bottom: 3rem;
+            font-weight: 400;
+        }
+
+        #aiChoiceScreen .buttons {
+            display: flex;
+            gap: 2rem;
+        }
+
+        #aiChoiceScreen button {
+            padding: 2rem 3rem;
+            font-size: 1.3rem;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            font-weight: 400;
+        }
+
+        #aiChoiceScreen .manual {
+            background: #fff;
+            color: #000;
+        }
+
+        #aiChoiceScreen .ai {
+            background: #4169E1;
+            color: #fff;
+        }
+
+        /* 背景選択画面 */
+        #bgSelectScreen {
+            background: linear-gradient(to bottom, #000, #1a0033);
+            padding: 2rem;
+            overflow-y: auto;
+            flex-direction: column;
+        }
+
+        #bgSelectScreen h2 {
+            font-size: clamp(2rem, 6vw, 3rem);
+            color: #fff;
+            text-align: center;
+            margin-bottom: 3rem;
+            font-weight: 400;
+        }
+
+        .backgroundGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .backgroundCard {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .backgroundCard:hover {
+            transform: scale(1.05);
+        }
+
+        .backgroundCard img {
+            width: 100%;
+            height: 160px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-bottom: 0.8rem;
+        }
+
+        .backgroundCard h3 {
+            font-size: 1.2rem;
+            color: #fff;
+            margin: 0;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        /* 戦闘画面 */
+        #battleScreen {
+            position: relative;
+            background-size: cover;
+            background-position: center;
+        }
+
+        #battleScreen .overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+
+        #battleScreen .attackEffect {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: clamp(3rem, 10vw, 7rem);
+            font-weight: 400;
+            color: #fff;
+            text-shadow: 0 0 30px #000;
+            animation: attackPulse 0.6s ease-out;
+            z-index: 1000;
+            pointer-events: none;
+            display: none;
+        }
+
+        #battleScreen .attackEffect.active {
+            display: block;
+        }
+
+        #battleScreen .battleArea {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 2rem;
+            position: relative;
+        }
+
+        #battleScreen .vs {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: clamp(4rem, 12vw, 7rem);
+            font-weight: 400;
+            color: #fff;
+            opacity: 0.2;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .fighter {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .fighter.active {
+            transform: scale(1.2);
+            opacity: 1;
+        }
+
+        .fighter.inactive {
+            transform: scale(0.8);
+            opacity: 0.5;
+        }
+
+        .fighter.player1.active {
+            transform: scale(1.2) translateX(40px);
+        }
+
+        .fighter.player1.inactive {
+            transform: scale(0.8) translateX(-30px);
+        }
+
+        .fighter.player2.active {
+            transform: scale(1.2) translateX(-40px);
+        }
+
+        .fighter.player2.inactive {
+            transform: scale(0.8) translateX(30px);
+        }
+
+        .fighterSprite {
+            margin-bottom: 1.5rem;
+            position: relative;
+        }
+
+        .fighterSprite img {
+            width: 220px;
+            height: 220px;
+            image-rendering: pixelated;
+        }
+
+        .fighter.player2 .fighterSprite img {
+            transform: scaleX(-1);
+        }
+
+        .fighterSprite.damaged {
+            animation: damageShake 0.4s ease-in-out 4;
+        }
+
+        .fighterSprite .damageFlash {
+            position: absolute;
+            inset: 0;
+            background: rgba(255, 0, 0, 0.4);
+            mix-blend-mode: multiply;
+            pointer-events: none;
+            animation: flashRed 0.15s ease-in-out 6;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .fighterSprite .damageFlash.active {
+            display: block;
+        }
+
+        .fighterInfo {
+            background: rgba(0, 0, 0, 0.85);
+            border-radius: 6px;
+            padding: 1.2rem;
+            min-width: 260px;
+        }
+
+        .fighterInfo h2 {
+            font-size: 1.4rem;
+            color: #fff;
+            margin: 0 0 0.4rem 0;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        .fighterInfo .standName {
+            font-size: 1rem;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .hpBar {
+            margin-bottom: 0.4rem;
+        }
+
+        .hpBar .hpLabel {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: #fff;
+            margin-bottom: 0.4rem;
+        }
+
+        .hpBar .hpBarOuter {
+            height: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .hpBar .hpBarInner {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+
+        .buffs {
+            margin-top: 0.8rem;
+            font-size: 0.75rem;
+            color: #aaa;
+        }
+
+        .buffs div {
+            margin-bottom: 0.2rem;
+        }
+
+        .actionButtons {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            animation: slideIn 0.4s ease-out;
+        }
+
+        .fighter.player1 .actionButtons {
+            left: 10px;
+        }
+
+        .fighter.player2 .actionButtons {
+            right: 10px;
+        }
+
+        .actionButton {
+            position: relative;
+            border: none;
+            border-radius: 4px;
+            padding: 0.8rem 1.2rem;
+            color: #fff;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 140px;
+            text-align: left;
+            font-weight: 400;
+        }
+
+        .actionButton:disabled {
+            background: #333 !important;
+            cursor: not-allowed;
+            opacity: 0.4;
+        }
+
+        .actionButton .actionName {
+            font-weight: 400;
+        }
+
+        .actionButton .actionDamage {
+            font-size: 0.8rem;
+            margin-top: 0.2rem;
+            opacity: 0.8;
+        }
+
+        .actionTooltip {
+            position: absolute;
+            top: 0;
+            background: rgba(0,0,0,0.95);
+            border: 1px solid #666;
+            border-radius: 4px;
+            padding: 0.8rem;
+            min-width: 200px;
+            z-index: 1000;
+            animation: fadeIn 0.2s ease-out;
+            font-size: 0.85rem;
+            display: none;
+        }
+
+        .actionButton:hover .actionTooltip {
+            display: block;
+        }
+
+        .fighter.player1 .actionTooltip {
+            left: 100%;
+            margin-left: 0.5rem;
+        }
+
+        .fighter.player2 .actionTooltip {
+            right: 100%;
+            margin-right: 0.5rem;
+        }
+
+        .actionTooltip .tooltipTitle {
+            color: #fff;
+            margin-bottom: 0.5rem;
+            font-weight: 400;
+        }
+
+        .actionTooltip .tooltipEffect {
+            display: block;
+            margin-bottom: 0.2rem;
+        }
+
+        .battleLog {
+            position: fixed;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 700px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 0.8rem;
+            max-height: 100px;
+            overflow-y: auto;
+            z-index: 100;
+        }
+
+        .battleLog .logTitle {
+            font-size: 0.85rem;
+            color: #999;
+            font-weight: 400;
+            margin-bottom: 0.4rem;
+        }
+
+        .battleLog .logEntry {
+            padding: 0.2rem 0;
+            color: #fff;
+            font-size: 0.8rem;
+        }
+
+        .gameOver {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .gameOver.active {
+            display: flex;
+        }
+
+        .gameOver h1 {
+            font-size: clamp(3rem, 12vw, 8rem);
+            font-weight: 400;
+            margin: 0 0 1rem 0;
+            animation: scaleIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .gameOver h2 {
+            font-size: clamp(2rem, 6vw, 4rem);
+            font-weight: 400;
+            color: #fff;
+            margin: 0 0 3rem 0;
+        }
+
+        .gameOver button {
+            background: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 1.2rem 3rem;
+            color: #000;
+            font-size: 1.3rem;
+            font-weight: 400;
+            cursor: pointer;
+        }
+
+        @keyframes fadeInDown {
+            0% { opacity: 0; transform: translateY(-50px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeInUp {
+            0% { opacity: 0; transform: translateY(50px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideInRight {
+            0% { opacity: 0; transform: translateX(50px); }
+            100% { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        @keyframes attackPulse {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+
+        @keyframes slideIn {
+            0% { opacity: 0; transform: translateY(-20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes damageShake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-8px); }
+            75% { transform: translateX(8px); }
+        }
+
+        @keyframes flashRed {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 0.6; }
+        }
+
+        @keyframes scaleIn {
+            0% { transform: scale(0); opacity: 0; }
+            60% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* オンライン対戦画面 */
+        #onlineMenuScreen, #joinRoomScreen, #waitingRoomScreen {
+            background: linear-gradient(135deg, #000 0%, #1a0033 100%);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #roomCodeInput {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        #roomCodeInput::placeholder {
+            color: rgba(255,255,255,0.3);
+        }
+
+        #playerList {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .playerItem {
+            background: rgba(255,255,255,0.1);
+            padding: 0.8rem 1.5rem;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 1rem;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- タイトル画面 -->
+        <div id="titleScreen" class="screen active">
+            <h1>STAND BATTLE</h1>
+            <div style="display: flex; flex-direction: column; gap: 1rem; align-items: center;">
+                <button onclick="startGame()" style="animation: fadeInUp 1s ease-out 0.3s both;">ローカル対戦</button>
+                <button onclick="showOnlineMenu()" style="animation: fadeInUp 1s ease-out 0.5s both; background: #4169E1;">オンライン対戦</button>
+            </div>
+            <div class="info">キャラ: <span id="charCount">0</span>体 / 背景: <span id="bgCount">0</span>枚</div>
+        </div>
+
+        <!-- オンラインメニュー画面 -->
+        <div id="onlineMenuScreen" class="screen">
+            <h1 style="font-size: clamp(2.5rem, 8vw, 4rem); color: #fff; margin-bottom: 3rem; font-weight: 400;">オンライン対戦</h1>
+            <div style="display: flex; flex-direction: column; gap: 1.5rem; align-items: center;">
+                <button onclick="createRoom()" style="background: #32CD32; padding: 1.5rem 3rem; font-size: 1.3rem; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 400;">ルームを作成</button>
+                <button onclick="showJoinRoom()" style="background: #4169E1; padding: 1.5rem 3rem; font-size: 1.3rem; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 400;">ルームに参加</button>
+                <button onclick="backToTitle()" style="background: #666; padding: 1rem 2rem; font-size: 1rem; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 400;">戻る</button>
+            </div>
+        </div>
+
+        <!-- ルーム参加画面 -->
+        <div id="joinRoomScreen" class="screen">
+            <h1 style="font-size: clamp(2.5rem, 8vw, 4rem); color: #fff; margin-bottom: 2rem; font-weight: 400;">ルームコード入力</h1>
+            <input type="text" id="roomCodeInput" maxlength="6" placeholder="6桁のコード" style="font-size: 2rem; padding: 1rem; width: 300px; text-align: center; letter-spacing: 0.3em; border: 2px solid #4169E1; border-radius: 4px; margin-bottom: 2rem;">
+            <div style="display: flex; gap: 1rem;">
+                <button onclick="joinRoom()" style="background: #4169E1; padding: 1.2rem 3rem; font-size: 1.2rem; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 400;">参加</button>
+                <button onclick="showOnlineMenu()" style="background: #666; padding: 1.2rem 2rem; font-size: 1.2rem; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 400;">戻る</button>
+            </div>
+        </div>
+
+        <!-- ルーム待機画面 -->
+        <div id="waitingRoomScreen" class="screen">
+            <h1 style="font-size: clamp(2.5rem, 8vw, 4rem); color: #fff; margin-bottom: 2rem; font-weight: 400;">ルーム待機中</h1>
+            <div style="background: rgba(0,0,0,0.5); padding: 2rem; border-radius: 8px; border: 2px solid #4169E1; margin-bottom: 2rem;">
+                <div style="font-size: 1rem; color: #999; margin-bottom: 0.5rem;">ルームコード</div>
+                <div id="roomCodeDisplay" style="font-size: 3rem; font-weight: 400; color: #4169E1; letter-spacing: 0.3em;"></div>
+            </div>
+            <div style="font-size: 1.2rem; color: #fff; margin-bottom: 2rem;">
+                待機中のプレイヤー: <span id="playerCount">1</span>人
+            </div>
+            <div id="playerList" style="margin-bottom: 2rem; max-width: 400px;"></div>
+            <button onclick="cancelRoom()" style="background: #dc143c; padding: 1rem 2rem; font-size: 1rem; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 400;">キャンセル</button>
+        </div>
+
+        <!-- 1P選択画面 -->
+        <div id="p1SelectScreen" class="screen selectScreen">
+            <div class="playerLabel">
+                <div class="subtitle">プレイヤー</div>
+                <div class="number">1P</div>
+            </div>
+            <div id="p1SelectedInfo" class="selectedInfo" style="display: none;">
+                <div class="subtitle">選択中</div>
+                <div id="p1SelectedName"></div>
+                <div id="p1SelectedStand"></div>
+            </div>
+            <h2>キャラクター選択</h2>
+            <div id="p1CharacterGrid" class="characterGrid"></div>
+        </div>
+
+        <!-- 2P選択画面 -->
+        <div id="p2SelectScreen" class="screen selectScreen">
+            <div class="playerLabel">
+                <div class="subtitle">プレイヤー</div>
+                <div class="number">2P</div>
+            </div>
+            <div id="p2SelectedInfo" class="selectedInfo" style="display: none;">
+                <div class="subtitle">選択中</div>
+                <div id="p2SelectedName"></div>
+                <div id="p2SelectedStand"></div>
+            </div>
+            <h2>キャラクター選択</h2>
+            <div id="p2CharacterGrid" class="characterGrid"></div>
+        </div>
+
+        <!-- AI選択画面 -->
+        <div id="aiChoiceScreen" class="screen">
+            <h2>2Pの操作方法を選択</h2>
+            <div class="buttons">
+                <button class="manual" onclick="selectAIMode(false)">手動操作</button>
+                <button class="ai" onclick="selectAIMode(true)">AI（自動）</button>
+            </div>
+        </div>
+
+        <!-- 背景選択画面 -->
+        <div id="bgSelectScreen" class="screen selectScreen">
+            <h2>戦闘背景選択</h2>
+            <div id="backgroundGrid" class="backgroundGrid"></div>
+        </div>
+
+        <!-- 戦闘画面 -->
+        <div id="battleScreen" class="screen">
+            <div class="overlay"></div>
+            <div class="attackEffect" id="attackEffect"></div>
+            <div class="battleArea">
+                <div class="fighter player1" id="fighter1">
+                    <div class="fighterSprite" id="sprite1">
+                        <img id="sprite1Img" src="" alt="">
+                        <div class="damageFlash" id="flash1"></div>
+                    </div>
+                    <div class="fighterInfo" id="info1">
+                        <h2 id="name1"></h2>
+                        <div class="standName" id="stand1"></div>
+                        <div class="hpBar">
+                            <div class="hpLabel">
+                                <span>HP</span>
+                                <span id="hp1Text"></span>
+                            </div>
+                            <div class="hpBarOuter" id="hpOuter1">
+                                <div class="hpBarInner" id="hpBar1"></div>
+                            </div>
+                        </div>
+                        <div class="buffs" id="buffs1"></div>
+                    </div>
+                    <div class="actionButtons" id="actions1"></div>
+                </div>
+                <div class="vs">VS</div>
+                <div class="fighter player2" id="fighter2">
+                    <div class="fighterSprite" id="sprite2">
+                        <img id="sprite2Img" src="" alt="">
+                        <div class="damageFlash" id="flash2"></div>
+                    </div>
+                    <div class="fighterInfo" id="info2">
+                        <h2 id="name2"></h2>
+                        <div class="standName" id="stand2"></div>
+                        <div class="hpBar">
+                            <div class="hpLabel">
+                                <span>HP</span>
+                                <span id="hp2Text"></span>
+                            </div>
+                            <div class="hpBarOuter" id="hpOuter2">
+                                <div class="hpBarInner" id="hpBar2"></div>
+                            </div>
+                        </div>
+                        <div class="buffs" id="buffs2"></div>
+                    </div>
+                    <div class="actionButtons" id="actions2"></div>
+                </div>
+            </div>
+            <div class="battleLog">
+                <div class="logTitle">BATTLE LOG</div>
+                <div id="battleLogContent"></div>
+            </div>
+            <div class="gameOver" id="gameOver">
+                <h1 id="winnerName"></h1>
+                <h2>VICTORY</h2>
+                <button onclick="returnToTitle()">タイトルへ</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =========================================
+        // Firebase設定（ユーザーが自分のプロジェクトのものに置き換える）
+        // =========================================
+        const firebaseConfig = {
+            // ⚠️ 重要: 以下を自分のFirebaseプロジェクトの設定に置き換えてください
+            // Firebase Console (https://console.firebase.google.com/) で取得できます
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        // Firebaseの初期化（エラーがあっても他の機能は動く）
+        let database = null;
+        let firebaseAvailable = false;
+        
+        try {
+            // Firebaseがロードされているか確認
+            if (typeof firebase !== 'undefined') {
+                if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+                    firebase.initializeApp(firebaseConfig);
+                    database = firebase.database();
+                    firebaseAvailable = true;
+                    console.log('Firebase初期化成功');
+                } else {
+                    console.log('Firebase設定が必要です（デフォルト値のまま）');
+                }
+            } else {
+                console.warn('Firebase SDKがロードされていません（オフライン使用）');
+            }
+        } catch (error) {
+            console.warn('Firebase初期化エラー:', error);
+            console.log('ローカル対戦のみ使用できます');
+        }
+
+        // オンライン対戦用の状態
+        const onlineState = {
+            isOnline: false,
+            roomCode: null,
+            playerId: null,
+            isHost: false,
+            opponentId: null,
+            roomRef: null
+        };
+
+        // =========================================
+        // オンライン対戦機能
+        // =========================================
+        
+        function showOnlineMenu() {
+            console.log('showOnlineMenu called, firebaseAvailable:', firebaseAvailable);
+            
+            if (!firebaseAvailable || !database) {
+                alert('オンライン対戦を使用するには、Firebaseの設定が必要です。\n\n' +
+                      '設定方法:\n' +
+                      '1. https://console.firebase.google.com/ にアクセス\n' +
+                      '2. 新しいプロジェクトを作成\n' +
+                      '3. Realtime Databaseを有効化\n' +
+                      '4. Web アプリを追加して設定情報を取得\n' +
+                      '5. ファイル内の firebaseConfig を置き換える\n\n' +
+                      '詳細はファイル先頭のコメントを参照してください。');
+                return;
+            }
+            switchScreen('onlineMenuScreen');
+        }
+
+        function backToTitle() {
+            switchScreen('titleScreen');
+        }
+
+        function showJoinRoom() {
+            document.getElementById('roomCodeInput').value = '';
+            switchScreen('joinRoomScreen');
+        }
+
+        function generateRoomCode() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+
+        async function createRoom() {
+            if (!database) return;
+            
+            onlineState.roomCode = generateRoomCode();
+            onlineState.playerId = 'player_' + Date.now();
+            onlineState.isHost = true;
+            onlineState.isOnline = true;
+            
+            // ルームをFirebaseに作成
+            onlineState.roomRef = database.ref('rooms/' + onlineState.roomCode);
+            
+            await onlineState.roomRef.set({
+                host: onlineState.playerId,
+                players: {
+                    [onlineState.playerId]: {
+                        id: onlineState.playerId,
+                        name: 'Player 1',
+                        joined: Date.now(),
+                        ready: false
+                    }
+                },
+                status: 'waiting',
+                createdAt: Date.now()
+            });
+            
+            // プレイヤー変更を監視
+            onlineState.roomRef.child('players').on('value', (snapshot) => {
+                const players = snapshot.val();
+                updatePlayerList(players);
+                
+                // 2人揃ったら、マッチング開始
+                if (players && Object.keys(players).length >= 2) {
+                    startOnlineMatching(players);
+                }
+            });
+            
+            // 待機画面を表示
+            document.getElementById('roomCodeDisplay').textContent = onlineState.roomCode;
+            switchScreen('waitingRoomScreen');
+        }
+
+        async function joinRoom() {
+            if (!database) return;
+            
+            const code = document.getElementById('roomCodeInput').value.toUpperCase();
+            if (code.length !== 6) {
+                alert('6桁のコードを入力してください');
+                return;
+            }
+            
+            onlineState.roomCode = code;
+            onlineState.playerId = 'player_' + Date.now();
+            onlineState.isHost = false;
+            onlineState.isOnline = true;
+            onlineState.roomRef = database.ref('rooms/' + code);
+            
+            // ルームが存在するか確認
+            const snapshot = await onlineState.roomRef.once('value');
+            if (!snapshot.exists()) {
+                alert('ルームが見つかりません');
+                return;
+            }
+            
+            const roomData = snapshot.val();
+            if (roomData.status !== 'waiting') {
+                alert('このルームは既に開始されています');
+                return;
+            }
+            
+            // ルームに参加
+            await onlineState.roomRef.child('players/' + onlineState.playerId).set({
+                id: onlineState.playerId,
+                name: 'Player ' + (Object.keys(roomData.players || {}).length + 1),
+                joined: Date.now(),
+                ready: false
+            });
+            
+            // プレイヤー変更を監視
+            onlineState.roomRef.child('players').on('value', (snapshot) => {
+                const players = snapshot.val();
+                updatePlayerList(players);
+                
+                if (players && Object.keys(players).length >= 2) {
+                    startOnlineMatching(players);
+                }
+            });
+            
+            // 待機画面を表示
+            document.getElementById('roomCodeDisplay').textContent = onlineState.roomCode;
+            switchScreen('waitingRoomScreen');
+        }
+
+        function updatePlayerList(players) {
+            if (!players) return;
+            
+            const playerCount = Object.keys(players).length;
+            document.getElementById('playerCount').textContent = playerCount;
+            
+            const listEl = document.getElementById('playerList');
+            listEl.innerHTML = '';
+            
+            Object.values(players).forEach((player, index) => {
+                const item = document.createElement('div');
+                item.className = 'playerItem';
+                item.textContent = `Player ${index + 1}`;
+                listEl.appendChild(item);
+            });
+        }
+
+        async function startOnlineMatching(players) {
+            const playerIds = Object.keys(players);
+            
+            // 奇数の場合、エラー
+            if (playerIds.length % 2 !== 0) {
+                // ホストの場合のみエラーを表示
+                if (onlineState.isHost) {
+                    alert('プレイヤーが奇数です。もう1人参加するまで待機してください。');
+                }
+                return;
+            }
+            
+            // ランダムにペアリング
+            const shuffled = playerIds.sort(() => Math.random() - 0.5);
+            const myIndex = shuffled.indexOf(onlineState.playerId);
+            
+            // ペアを決定
+            const pairIndex = Math.floor(myIndex / 2);
+            const opponentIndex = myIndex % 2 === 0 ? pairIndex * 2 + 1 : pairIndex * 2;
+            onlineState.opponentId = shuffled[opponentIndex];
+            
+            // マッチング情報を保存
+            await onlineState.roomRef.child('matches/' + pairIndex).set({
+                player1: shuffled[pairIndex * 2],
+                player2: shuffled[pairIndex * 2 + 1],
+                status: 'selecting'
+            });
+            
+            // キャラクター選択へ
+            setTimeout(() => {
+                startOnlineGame();
+            }, 2000);
+        }
+
+        function startOnlineGame() {
+            renderCharacterGrid('p1CharacterGrid', selectPlayer1Online);
+            switchScreen('p1SelectScreen');
+        }
+
+        function selectPlayer1Online(char) {
+            gameState.player1 = char;
+            
+            // キャラ選択を相手に送信
+            onlineState.roomRef.child('selections/' + onlineState.playerId).set({
+                character: {
+                    id: char.id,
+                    name: char.name,
+                    standName: char.standName,
+                    color: char.color,
+                    stats: char.stats
+                }
+            });
+            
+            // 相手の選択を待つ
+            onlineState.roomRef.child('selections/' + onlineState.opponentId).once('value', (snapshot) => {
+                if (snapshot.exists()) {
+                    const opponentChar = snapshot.val().character;
+                    // デモキャラからマッチング
+                    gameState.player2 = gameState.characters.find(c => c.id === opponentChar.id) || gameState.characters[0];
+                    
+                    renderBackgroundGrid();
+                    switchScreen('bgSelectScreen');
+                }
+            });
+        }
+
+        function cancelRoom() {
+            if (onlineState.roomRef) {
+                // ルームから退出
+                onlineState.roomRef.child('players/' + onlineState.playerId).remove();
+                
+                // ホストの場合、ルームを削除
+                if (onlineState.isHost) {
+                    onlineState.roomRef.remove();
+                }
+                
+                onlineState.roomRef.off();
+            }
+            
+            onlineState.isOnline = false;
+            onlineState.roomCode = null;
+            onlineState.playerId = null;
+            onlineState.opponentId = null;
+            onlineState.roomRef = null;
+            
+            backToTitle();
+        }
+
+        // =========================================
+        // ゲーム状態管理
+        // =========================================
+        const gameState = {
+            characters: [],
+            backgrounds: [],
+            player1: null,
+            player2: null,
+            battleBg: null,
+            isP2AI: false,
+            currentTurn: 'player1',
+            animating: false,
+            player1HP: 100,
+            player2HP: 100,
+            player1MaxHP: 100,
+            player2MaxHP: 100,
+            player1Buffs: resetBuffs(),
+            player2Buffs: resetBuffs(),
+            battleLog: [],
+            bgmAudio: null
+        };
+
+        function resetBuffs() {
+            return {
+                defense: 0, defenseTurns: 0,
+                attackBoost: 1, attackBoostTurns: 0,
+                continuousDamage: 0, continuousDamageTurns: 0,
+                continuousHeal: 0, continuousHealTurns: 0
+            };
+        }
+
+        // 初期化
+        async function init() {
+            await loadGameData();
+            updateCounts();
+        }
+
+        async function loadGameData() {
+            try {
+                gameState.characters = [];
+                gameState.backgrounds = [];
+
+                // localStorageから全キーを取得
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    
+                    if (key.startsWith('character:')) {
+                        try {
+                            const value = localStorage.getItem(key);
+                            if (value) gameState.characters.push(JSON.parse(value));
+                        } catch (e) {}
+                    }
+                    
+                    if (key.startsWith('background:')) {
+                        try {
+                            const value = localStorage.getItem(key);
+                            if (value) gameState.backgrounds.push(JSON.parse(value));
+                        } catch (e) {}
+                    }
+                }
+
+                // デモデータ
+                if (gameState.characters.length === 0) {
+                    gameState.characters = createDemoCharacters();
+                }
+
+                if (gameState.backgrounds.length === 0) {
+                    gameState.backgrounds = createDemoBackgrounds();
+                }
+            } catch (error) {
+                gameState.characters = createDemoCharacters();
+                gameState.backgrounds = createDemoBackgrounds();
+            }
+        }
+
+        function createDemoSprite(color) {
+            return `data:image/svg+xml,${encodeURIComponent(`<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="30" r="15" fill="${color}"/><rect x="35" y="45" width="30" height="35" fill="${color}"/><rect x="25" y="50" width="10" height="25" fill="${color}"/><rect x="65" y="50" width="10" height="25" fill="${color}"/><rect x="40" y="80" width="8" height="20" fill="${color}"/><rect x="52" y="80" width="8" height="20" fill="${color}"/></svg>`)}`;
+        }
+
+        function createDemoBackground(color1, color2) {
+            const id = Math.random().toString(36).substr(2, 9);
+            return `data:image/svg+xml,${encodeURIComponent(`<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="grad_${id}" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:${color1};stop-opacity:1" /><stop offset="100%" style="stop-color:${color2};stop-opacity:1" /></linearGradient></defs><rect width="800" height="600" fill="url(#grad_${id})"/></svg>`)}`;
+        }
+
+        function getDefaultActions() {
+            return [
+                { id: 'rush', name: 'ラッシュ', type: 'stand', enabled: true, color: '#FFD700', damage: { enabled: true, value: 25, target: 'enemy' }, attackBoost: { enabled: false }, defense: { enabled: false }, heal: { enabled: false }, continuousDamage: { enabled: false }, continuousHeal: { enabled: false } },
+                { id: 'punch', name: '通常攻撃', type: 'normal', enabled: true, color: '#666', damage: { enabled: true, value: 15, target: 'enemy' }, attackBoost: { enabled: false }, defense: { enabled: false }, heal: { enabled: false }, continuousDamage: { enabled: false }, continuousHeal: { enabled: false } },
+                { id: 'guard', name: '防御', type: 'defend', enabled: true, color: '#32CD32', defense: { enabled: true, damageReduction: 20, turns: 1 }, damage: { enabled: false }, attackBoost: { enabled: false }, heal: { enabled: false }, continuousDamage: { enabled: false }, continuousHeal: { enabled: false } },
+                { id: 'special', name: '必殺技', type: 'special', enabled: true, color: '#FF1493', damage: { enabled: true, value: 40, target: 'enemy' }, attackBoost: { enabled: false }, defense: { enabled: false }, heal: { enabled: false }, continuousDamage: { enabled: false }, continuousHeal: { enabled: false } }
+            ];
+        }
+
+        function createDemoCharacters() {
+            return [
+                { id: 'jotaro', name: '空条承太郎', standName: 'スタープラチナ', color: '#4169E1', stats: { maxHP: 100, resistance: 10 }, sprites: { normal: createDemoSprite('#4169E1'), battle: createDemoSprite('#1E90FF'), critical: createDemoSprite('#DC143C'), stand: createDemoSprite('#FFD700') }, actions: getDefaultActions() },
+                { id: 'dio', name: 'DIO', standName: 'ザ・ワールド', color: '#FFD700', stats: { maxHP: 120, resistance: 5 }, sprites: { normal: createDemoSprite('#FFD700'), battle: createDemoSprite('#FFA500'), critical: createDemoSprite('#DC143C'), stand: createDemoSprite('#FF1493') }, actions: getDefaultActions() },
+                { id: 'joseph', name: 'ジョセフ', standName: 'ハーミットパープル', color: '#8B008B', stats: { maxHP: 90, resistance: 15 }, sprites: { normal: createDemoSprite('#8B008B'), battle: createDemoSprite('#9932CC'), critical: createDemoSprite('#DC143C'), stand: createDemoSprite('#DA70D6') }, actions: getDefaultActions() },
+                { id: 'rohan', name: '岸辺露伴', standName: 'ヘブンズドア', color: '#00FF00', stats: { maxHP: 80, resistance: 20 }, sprites: { normal: createDemoSprite('#00FF00'), battle: createDemoSprite('#32CD32'), critical: createDemoSprite('#DC143C'), stand: createDemoSprite('#7FFF00') }, actions: getDefaultActions() },
+                { id: 'bucciarati', name: 'ブチャラティ', standName: 'スティッキーF', color: '#F0F8FF', stats: { maxHP: 95, resistance: 12 }, sprites: { normal: createDemoSprite('#F0F8FF'), battle: createDemoSprite('#87CEEB'), critical: createDemoSprite('#DC143C'), stand: createDemoSprite('#4682B4') }, actions: getDefaultActions() },
+                { id: 'giorno', name: 'ジョルノ', standName: 'ゴールドE', color: '#FF1493', stats: { maxHP: 100, resistance: 8 }, sprites: { normal: createDemoSprite('#FF1493'), battle: createDemoSprite('#FF69B4'), critical: createDemoSprite('#DC143C'), stand: createDemoSprite('#FFD700') }, actions: getDefaultActions() }
+            ];
+        }
+
+        function createDemoBackgrounds() {
+            return [
+                { id: 'egypt', name: 'エジプト', image: createDemoBackground('#8B4513', '#DAA520'), bgm: null },
+                { id: 'morioh', name: '杜王町', image: createDemoBackground('#87CEEB', '#90EE90'), bgm: null },
+                { id: 'italy', name: 'イタリア', image: createDemoBackground('#FF6347', '#FFD700'), bgm: null }
+            ];
+        }
+
+        function updateCounts() {
+            document.getElementById('charCount').textContent = gameState.characters.length;
+            document.getElementById('bgCount').textContent = gameState.backgrounds.length;
+        }
+
+        function switchScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        function startGame() {
+            renderCharacterGrid('p1CharacterGrid', selectPlayer1);
+            switchScreen('p1SelectScreen');
+        }
+
+        function renderCharacterGrid(gridId, onSelect) {
+            const grid = document.getElementById(gridId);
+            grid.innerHTML = '';
+            
+            gameState.characters.forEach(char => {
+                const card = document.createElement('div');
+                card.className = 'characterCard';
+                card.style.border = `1px solid ${char.color}`;
+                card.onclick = () => onSelect(char);
+                
+                card.innerHTML = `
+                    <img src="${char.sprites.normal}" alt="${char.name}" style="filter: drop-shadow(0 0 10px ${char.color})">
+                    <h3>${char.name}</h3>
+                    <p style="color: ${char.color}">『${char.standName}』</p>
+                `;
+                
+                grid.appendChild(card);
+            });
+        }
+
+        function selectPlayer1(char) {
+            gameState.player1 = char;
+            document.getElementById('p1SelectedInfo').style.display = 'block';
+            document.getElementById('p1SelectedName').textContent = char.name;
+            document.getElementById('p1SelectedName').style.fontSize = '1.3rem';
+            document.getElementById('p1SelectedName').style.color = '#fff';
+            document.getElementById('p1SelectedStand').textContent = `『${char.standName}』`;
+            document.getElementById('p1SelectedStand').style.fontSize = '1rem';
+            document.getElementById('p1SelectedStand').style.color = char.color;
+            
+            setTimeout(() => {
+                renderCharacterGrid('p2CharacterGrid', selectPlayer2);
+                switchScreen('p2SelectScreen');
+            }, 500);
+        }
+
+        function selectPlayer2(char) {
+            gameState.player2 = char;
+            switchScreen('aiChoiceScreen');
+        }
+
+        function selectAIMode(isAI) {
+            gameState.isP2AI = isAI;
+            renderBackgroundGrid();
+            switchScreen('bgSelectScreen');
+        }
+
+        function renderBackgroundGrid() {
+            const grid = document.getElementById('backgroundGrid');
+            grid.innerHTML = '';
+            
+            gameState.backgrounds.forEach(bg => {
+                const card = document.createElement('div');
+                card.className = 'backgroundCard';
+                card.onclick = () => selectBackground(bg);
+                
+                card.innerHTML = `
+                    <img src="${bg.image}" alt="${bg.name}">
+                    <h3>${bg.name}</h3>
+                `;
+                
+                grid.appendChild(card);
+            });
+        }
+
+        function selectBackground(bg) {
+            gameState.battleBg = bg;
+            initBattle();
+        }
+
+        function initBattle() {
+            const p1MaxHP = gameState.player1.stats?.maxHP || 100;
+            const p2MaxHP = gameState.player2.stats?.maxHP || 100;
+            gameState.player1MaxHP = p1MaxHP;
+            gameState.player2MaxHP = p2MaxHP;
+            gameState.player1HP = p1MaxHP;
+            gameState.player2HP = p2MaxHP;
+            gameState.currentTurn = 'player1';
+            gameState.battleLog = ['バトル開始！'];
+            gameState.player1Buffs = resetBuffs();
+            gameState.player2Buffs = resetBuffs();
+            gameState.animating = false;
+            
+            // オンライン対戦の場合は手動モード
+            if (onlineState.isOnline) {
+                gameState.isP2AI = false;
+            }
+            
+            // 背景設定
+            document.getElementById('battleScreen').style.backgroundImage = `url(${gameState.battleBg.image})`;
+            
+            // BGM再生
+            if (gameState.bgmAudio) {
+                gameState.bgmAudio.pause();
+                gameState.bgmAudio.currentTime = 0;
+            }
+            
+            if (gameState.battleBg.bgm) {
+                const audio = new Audio(gameState.battleBg.bgm);
+                audio.loop = true;
+                audio.volume = 0.5;
+                audio.play().catch(err => console.log('BGM再生エラー:', err));
+                gameState.bgmAudio = audio;
+            }
+            
+            // キャラ情報設定
+            setupFighter(1, gameState.player1, p1MaxHP);
+            setupFighter(2, gameState.player2, p2MaxHP);
+            
+            // アクションボタン作成
+            renderActionButtons(1, gameState.player1);
+            renderActionButtons(2, gameState.player2);
+            
+            updateBattleUI();
+            switchScreen('battleScreen');
+            
+            // オンライン対戦の場合、ターン同期を開始
+            if (onlineState.isOnline) {
+                setupOnlineBattle();
+            }
+        }
+
+        // =========================================
+        // オンライン対戦の戦闘同期
+        // =========================================
+        function setupOnlineBattle() {
+            // 相手のアクションを監視
+            onlineState.roomRef.child('actions/' + onlineState.opponentId).on('value', (snapshot) => {
+                if (snapshot.exists()) {
+                    const opponentAction = snapshot.val();
+                    if (opponentAction.turn === gameState.currentTurn && !gameState.animating) {
+                        executeActionReal(opponentAction.action);
+                    }
+                }
+            });
+        }
+
+        function sendOnlineAction(action) {
+            if (!onlineState.roomRef) return;
+            
+            // 自分のアクションをFirebaseに送信
+            onlineState.roomRef.child('actions/' + onlineState.playerId).set({
+                action: {
+                    id: action.id,
+                    name: action.name,
+                    damage: action.damage,
+                    heal: action.heal,
+                    defense: action.defense,
+                    attackBoost: action.attackBoost,
+                    continuousDamage: action.continuousDamage,
+                    continuousHeal: action.continuousHeal
+                },
+                turn: gameState.currentTurn,
+                timestamp: Date.now()
+            });
+            
+            // ローカルで実行
+            executeActionReal(action);
+        }
+        
+        function setupFighter(num, char, maxHP) {
+            document.getElementById(`name${num}`).textContent = char.name;
+            document.getElementById(`stand${num}`).textContent = `『${char.standName}』`;
+            document.getElementById(`stand${num}`).style.color = char.color;
+            document.getElementById(`info${num}`).style.border = `2px solid ${char.color}`;
+            document.getElementById(`hpOuter${num}`).style.border = `1px solid ${char.color}`;
+            document.getElementById(`hp${num}Text`).textContent = `${maxHP}/${maxHP}`;
+        }
+
+        function renderActionButtons(playerNum, char) {
+            const actions = char.actions || getDefaultActions();
+            const container = document.getElementById(`actions${playerNum}`);
+            container.innerHTML = '';
+            
+            actions.forEach(action => {
+                const button = document.createElement('button');
+                button.className = 'actionButton';
+                button.style.background = action.color || char.color;
+                button.onclick = () => executeAction(action);
+                
+                let tooltip = `<div class="tooltipTitle">${action.name}</div>`;
+                if (action.damage?.enabled) tooltip += `<span class="tooltipEffect" style="color: #ff6666">• ダメージ: ${action.damage.value}</span>`;
+                if (action.heal?.enabled) tooltip += `<span class="tooltipEffect" style="color: #66ff66">• 回復: ${action.heal.value}</span>`;
+                if (action.defense?.enabled) tooltip += `<span class="tooltipEffect" style="color: #66b3ff">• 防御: ${action.defense.damageReduction} (${action.defense.turns}T)</span>`;
+                if (action.attackBoost?.enabled) tooltip += `<span class="tooltipEffect" style="color: #ffaa00">• 攻撃x${action.attackBoost.multiplier} (${action.attackBoost.turns}T)</span>`;
+                if (action.continuousDamage?.enabled) tooltip += `<span class="tooltipEffect" style="color: #ff9999">• 継続DMG: ${action.continuousDamage.value} (${action.continuousDamage.turns}T)</span>`;
+                if (action.continuousHeal?.enabled) tooltip += `<span class="tooltipEffect" style="color: #99ff99">• 継続回復: ${action.continuousHeal.value} (${action.continuousHeal.turns}T)</span>`;
+                
+                button.innerHTML = `
+                    <div class="actionName">${action.name}</div>
+                    ${action.damage?.enabled ? `<div class="actionDamage">${action.damage.value} DMG</div>` : ''}
+                    <div class="actionTooltip">${tooltip}</div>
+                `;
+                
+                container.appendChild(button);
+            });
+        }
+
+        function executeAction(action) {
+            if (gameState.animating) return;
+            
+            // オンライン対戦の場合、アクションを送信
+            if (onlineState.isOnline) {
+                sendOnlineAction(action);
+                return;
+            }
+            
+            // ローカル対戦の場合、直接実行
+            executeActionReal(action);
+        }
+
+        function executeActionReal(action) {
+            if (gameState.animating) return;
+            
+            gameState.animating = true;
+            
+            const isPlayer1Turn = gameState.currentTurn === 'player1';
+            const attacker = isPlayer1Turn ? gameState.player1 : gameState.player2;
+            const attackerHP = isPlayer1Turn ? gameState.player1HP : gameState.player2HP;
+            const defenderHP = isPlayer1Turn ? gameState.player2HP : gameState.player1HP;
+            const attackerBuffs = isPlayer1Turn ? gameState.player1Buffs : gameState.player2Buffs;
+            const defenderBuffs = isPlayer1Turn ? gameState.player2Buffs : gameState.player1Buffs;
+            const attackerMaxHP = isPlayer1Turn ? gameState.player1MaxHP : gameState.player2MaxHP;
+            const defenderMaxHP = isPlayer1Turn ? gameState.player2MaxHP : gameState.player1MaxHP;
+            const defender = isPlayer1Turn ? gameState.player2 : gameState.player1;
+            const defenderResistance = (defender.stats?.resistance || 0) / 100;
+            
+            // エフェクト表示
+            const effectEl = document.getElementById('attackEffect');
+            effectEl.textContent = action.name;
+            effectEl.classList.add('active');
+            
+            setTimeout(() => {
+                effectEl.classList.remove('active');
+                
+                let logMessages = [];
+                
+                // ダメージ処理
+                if (action.damage?.enabled) {
+                    let baseDamage = action.damage.value;
+                    if (attackerBuffs.attackBoostTurns > 0) {
+                        baseDamage = Math.floor(baseDamage * attackerBuffs.attackBoost);
+                    }
+                    
+                    let finalDamage = baseDamage;
+                    if (defenderBuffs.defenseTurns > 0) {
+                        finalDamage = Math.max(0, finalDamage - defenderBuffs.defense);
+                    }
+                    
+                    finalDamage = Math.floor(finalDamage * (1 - defenderResistance));
+                    
+                    const target = action.damage.target === 'enemy' ? 'defender' : 'attacker';
+                    if (target === 'defender') {
+                        const newHP = Math.max(0, defenderHP - finalDamage);
+                        if (isPlayer1Turn) gameState.player2HP = newHP;
+                        else gameState.player1HP = newHP;
+                        
+                        showDamageFlash(isPlayer1Turn ? 2 : 1);
+                        logMessages.push(`${attacker.name}: ${action.name} - ${finalDamage}ダメージ！`);
+                        
+                        if (newHP <= 0) {
+                            gameState.battleLog.unshift(`${attacker.name}の勝利！`);
+                            updateBattleLog();
+                            showGameOver(attacker.name, attacker.color);
+                            gameState.animating = false;
+                            return;
+                        }
+                    } else {
+                        const newHP = Math.max(0, attackerHP - finalDamage);
+                        if (isPlayer1Turn) gameState.player1HP = newHP;
+                        else gameState.player2HP = newHP;
+                        logMessages.push(`自傷: ${finalDamage}ダメージ`);
+                    }
+                }
+                
+                // 継続ダメージ
+                if (action.continuousDamage?.enabled) {
+                    const target = action.continuousDamage.target === 'enemy' ? 'defender' : 'attacker';
+                    const buffs = target === 'defender' ? defenderBuffs : attackerBuffs;
+                    buffs.continuousDamage = action.continuousDamage.value;
+                    buffs.continuousDamageTurns = action.continuousDamage.turns;
+                    logMessages.push(`継続ダメージ付与: ${action.continuousDamage.turns}ターン`);
+                }
+                
+                // 回復
+                if (action.heal?.enabled) {
+                    const target = action.heal.target === 'self' ? 'attacker' : 'defender';
+                    if (target === 'attacker') {
+                        const newHP = Math.min(attackerMaxHP, attackerHP + action.heal.value);
+                        if (isPlayer1Turn) gameState.player1HP = newHP;
+                        else gameState.player2HP = newHP;
+                        logMessages.push(`回復: ${action.heal.value}`);
+                    } else {
+                        const newHP = Math.min(defenderMaxHP, defenderHP + action.heal.value);
+                        if (isPlayer1Turn) gameState.player2HP = newHP;
+                        else gameState.player1HP = newHP;
+                        logMessages.push(`相手を回復: ${action.heal.value}`);
+                    }
+                }
+                
+                // 継続回復
+                if (action.continuousHeal?.enabled) {
+                    const target = action.continuousHeal.target === 'self' ? 'attacker' : 'defender';
+                    const buffs = target === 'attacker' ? attackerBuffs : defenderBuffs;
+                    buffs.continuousHeal = action.continuousHeal.value;
+                    buffs.continuousHealTurns = action.continuousHeal.turns;
+                    logMessages.push(`継続回復付与: ${action.continuousHeal.turns}ターン`);
+                }
+                
+                // 防御バフ
+                if (action.defense?.enabled) {
+                    attackerBuffs.defense = action.defense.damageReduction;
+                    attackerBuffs.defenseTurns = action.defense.turns;
+                    logMessages.push(`防御態勢: ${action.defense.turns}ターン`);
+                }
+                
+                // 攻撃力バフ
+                if (action.attackBoost?.enabled) {
+                    attackerBuffs.attackBoost = action.attackBoost.multiplier;
+                    attackerBuffs.attackBoostTurns = action.attackBoost.turns;
+                    logMessages.push(`攻撃力上昇: ${action.attackBoost.multiplier}倍 ${action.attackBoost.turns}ターン`);
+                }
+                
+                if (logMessages.length === 0) {
+                    logMessages.push(`${attacker.name}: ${action.name}`);
+                }
+                
+                gameState.battleLog = [...logMessages, ...gameState.battleLog.slice(0, 4)];
+                updateBattleLog();
+                updateBattleUI();
+                
+                setTimeout(() => {
+                    // ターン交代
+                    gameState.currentTurn = isPlayer1Turn ? 'player2' : 'player1';
+                    gameState.animating = false;
+                    updateBattleUI();
+                    
+                    // AI自動実行
+                    if (gameState.currentTurn === 'player2' && gameState.isP2AI) {
+                        setTimeout(() => aiTurn(), 1500);
+                    }
+                }, 1000);
+            }, 1500);
+        }
+
+        function aiTurn() {
+            const actions = gameState.player2.actions || getDefaultActions();
+            const randomAction = actions[Math.floor(Math.random() * actions.length)];
+            executeAction(randomAction);
+        }
+
+        function showDamageFlash(playerNum) {
+            const sprite = document.getElementById(`sprite${playerNum}`);
+            const flash = document.getElementById(`flash${playerNum}`);
+            
+            sprite.classList.add('damaged');
+            flash.classList.add('active');
+            
+            setTimeout(() => {
+                sprite.classList.remove('damaged');
+                flash.classList.remove('active');
+            }, 1500);
+        }
+
+        function updateBattleUI() {
+            // プレイヤー1
+            updateFighterUI(1, gameState.player1, gameState.player1HP, gameState.player1MaxHP, gameState.player1Buffs, gameState.currentTurn === 'player1');
+            
+            // プレイヤー2
+            updateFighterUI(2, gameState.player2, gameState.player2HP, gameState.player2MaxHP, gameState.player2Buffs, gameState.currentTurn === 'player2');
+        }
+
+        function updateFighterUI(num, char, hp, maxHP, buffs, isActive) {
+            const fighter = document.getElementById(`fighter${num}`);
+            const hpPercent = (hp / maxHP) * 100;
+            
+            fighter.className = `fighter player${num} ${isActive ? 'active' : 'inactive'}`;
+            
+            // HP表示
+            document.getElementById(`hp${num}Text`).textContent = `${hp}/${maxHP}`;
+            const hpBar = document.getElementById(`hpBar${num}`);
+            hpBar.style.width = `${hpPercent}%`;
+            hpBar.style.background = hpPercent > 50 ? '#00ff00' : hpPercent > 25 ? '#ffaa00' : '#ff0000';
+            
+            // スプライト
+            const spriteType = hp <= maxHP * 0.25 ? 'critical' : isActive ? 'battle' : 'normal';
+            document.getElementById(`sprite${num}Img`).src = char.sprites[spriteType];
+            
+            // バフ表示
+            let buffsHTML = '';
+            if (buffs.defenseTurns > 0) buffsHTML += `<div>🛡️ 防御 ${buffs.defense} (${buffs.defenseTurns}ターン)</div>`;
+            if (buffs.attackBoostTurns > 0) buffsHTML += `<div>⚔️ 攻撃 x${buffs.attackBoost} (${buffs.attackBoostTurns}ターン)</div>`;
+            document.getElementById(`buffs${num}`).innerHTML = buffsHTML;
+            
+            // アクションボタン表示
+            const actionsEl = document.getElementById(`actions${num}`);
+            if (isActive && (num === 1 || !gameState.isP2AI)) {
+                actionsEl.style.display = 'flex';
+                actionsEl.querySelectorAll('button').forEach(btn => {
+                    btn.disabled = gameState.animating;
+                });
+            } else {
+                actionsEl.style.display = 'none';
+            }
+        }
+
+        function updateBattleLog() {
+            const logEl = document.getElementById('battleLogContent');
+            logEl.innerHTML = gameState.battleLog.map((log, i) => 
+                `<div class="logEntry" style="opacity: ${1 - (i * 0.2)}">${log}</div>`
+            ).join('');
+        }
+
+        function showGameOver(winnerName, winnerColor) {
+            document.getElementById('winnerName').textContent = winnerName;
+            document.getElementById('winnerName').style.color = winnerColor;
+            document.getElementById('gameOver').classList.add('active');
+        }
+
+        function returnToTitle() {
+            if (gameState.bgmAudio) {
+                gameState.bgmAudio.pause();
+                gameState.bgmAudio.currentTime = 0;
+                gameState.bgmAudio = null;
+            }
+            
+            gameState.player1 = null;
+            gameState.player2 = null;
+            gameState.battleBg = null;
+            gameState.isP2AI = false;
+            
+            document.getElementById('gameOver').classList.remove('active');
+            switchScreen('titleScreen');
+        }
+
+        // 初期化
+        init();
+    </script>
+</body>
+</html>
